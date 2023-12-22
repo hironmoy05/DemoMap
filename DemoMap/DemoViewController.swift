@@ -6,19 +6,20 @@
 //
 
 import UIKit
+import GoogleMaps
 
 class DemoViewController: UIViewController {
     @IBOutlet weak var titleLabel: UILabel!
     var titleText : String = ""
-    var me: Person?
+    var marker: GMSMarker?
     
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        titleLabel.numberOfLines = 0
         // Do any additional setup after loading the view.
-        titleLabel.text = titleText
-        if let me {
-            print(me.name, me.age, me.height)
+        if let data = marker!.userData as? Person {
+            titleLabel.text = "\(titleText) \n name: \(data.name) \n age: \(data.age) \n height: \(data.height)"
         }
     }
     

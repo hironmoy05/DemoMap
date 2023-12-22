@@ -10,6 +10,9 @@ import GoogleMaps
 import CoreLocation
 import GoogleMapsUtils
 
+import GoogleMaps
+
+
 struct Person {
     let name: String
     let age: Int
@@ -26,6 +29,7 @@ class ViewController: UIViewController {
     var currentMapTypeIdx = 0
     var customView: Viewn!
     var isPolygonHidden: Bool = false
+    var polygonCount = 0
     
     var clusterManager: GMUClusterManager!
     var drawCoordinates: [CLLocationCoordinate2D] = []
@@ -87,6 +91,28 @@ class ViewController: UIViewController {
         return button
     }()
     
+    var routeToPolygon: UIButton = {
+        let button = UIButton(type: .system)
+        let width: Float = 100
+        
+        button.setImage(UIImage(systemName: "circle.hexagonpath"), for: .normal)
+        button.frame.size.width = CGFloat(width)
+        button.addTarget(self, action: #selector(getPolygonToTheCenter), for: .touchUpInside)
+        button.backgroundColor = UIColor.white
+        button.layer.cornerRadius = CGFloat(width / 3)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        
+        return button
+    }()
+    
+    var customLabel: UILabel = {
+       var label = UILabel(frame: CGRect(x: 0, y: 0, width: 200, height: 20))
+        label.text = "Christmas Christmas Christmas Christmas"
+        label.textColor = UIColor.orange
+        
+        return label
+    }()
+    
     lazy var canvasView: CanvasView = {
         var overlayView = CanvasView(frame: self.mapView.frame)
         overlayView.isUserInteractionEnabled = true
@@ -100,7 +126,8 @@ class ViewController: UIViewController {
         setupMapView()
         setupCluster()
         clusterManager.setMapDelegate(self)
-        loadPolygon()
+        loadPolygons()
+        isDrawing = false
     }
     
     func drawPolygon(_ coordinates: [CLLocationCoordinate2D]) {
@@ -114,6 +141,7 @@ class ViewController: UIViewController {
         newpolygon.strokeWidth = 3
         newpolygon.strokeColor = UIColor(red: 20.0/255.0, green: 119.0/255.0, blue: 234.0/255.0, alpha: 0.75)
         newpolygon.fillColor = UIColor(red: 156.0/255.0, green: 202.0/255.0, blue: 254.0/255.0, alpha: 0.4)
+        newpolygon.isTappable = true
         newpolygon.map = mapView
         userDrawablePolygons.append(newpolygon)
     }
@@ -139,6 +167,7 @@ class ViewController: UIViewController {
         mapView.addSubview(mapButton)
         mapView.addSubview(buttonDraw)
         mapView.addSubview(hideCanvasBtn)
+        mapView.addSubview(routeToPolygon)
         
         NSLayoutConstraint.activate([
             mapButton.topAnchor.constraint(equalTo: mapView.safeAreaLayoutGuide.topAnchor, constant: 60),
@@ -155,10 +184,17 @@ class ViewController: UIViewController {
         ])
         
         NSLayoutConstraint.activate([
-            hideCanvasBtn.topAnchor.constraint(equalTo: mapView.safeAreaLayoutGuide.topAnchor, constant:220),
+            hideCanvasBtn.topAnchor.constraint(equalTo: mapView.safeAreaLayoutGuide.topAnchor, constant:200),
             hideCanvasBtn.trailingAnchor.constraint(equalTo: mapView.trailingAnchor, constant: -20),
             hideCanvasBtn.widthAnchor.constraint(equalToConstant: 60),
             hideCanvasBtn.heightAnchor.constraint(equalToConstant: 60)
+        ])
+        
+        NSLayoutConstraint.activate([
+            routeToPolygon.topAnchor.constraint(equalTo: mapView.safeAreaLayoutGuide.topAnchor, constant:300),
+            routeToPolygon.trailingAnchor.constraint(equalTo: mapView.trailingAnchor, constant: -20),
+            routeToPolygon.widthAnchor.constraint(equalToConstant: 60),
+            routeToPolygon.heightAnchor.constraint(equalToConstant: 60)
         ])
     }
     
@@ -207,6 +243,7 @@ class ViewController: UIViewController {
         markersInsideShape.removeAll()
         locations.removeAll()
         randomMarkers.removeAll()
+        UserDefaults.standard.removeObject(forKey: "savedPolygons")
         mapView.clear()
         
         clusterManager.clearItems()
@@ -229,13 +266,40 @@ extension ViewController: CLLocationManagerDelegate, GMSMapViewDelegate {
                                               zoom: 20)
         
         mapView.animate(to: camera)
-        addMarker(at: coordinate)
+        let person = Person(name: "Saurav", age: 20, height: 6)
+        addMarker(at: coordinate, person: person)
         
         locationManager.stopUpdatingLocation()
     }
     
     func mapView(_ mapView: GMSMapView, didLongPressAt coordinate: CLLocationCoordinate2D) {
-            addMarker(at: coordinate)
+        print("Latitude: \(coordinate.latitude), Logitude: \(coordinate.longitude) ")
+        let person = Person(name: "Hello marker", age: 5, height: 7)
+            addMarker(at: coordinate, person: person)
+//        DispatchQueue.main.async {
+//            let marker = GMSMarker(position: coordinate)
+//            marker.title = "Marrrrrkkkkkkkeeeeeeerrrrrr"
+//            marker.map = mapView
+//        }
+    }
+    
+    func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {
+        if isCoordinatePolygon(coordinate) {
+            for i in 0..<userDrawablePolygons.count {
+                if userDrawablePolygons[i].contains(coordinate: coordinate) {
+                    userDrawablePolygons[0].fillColor = UIColor.green
+                }
+            }
+       }
+    }
+
+    func isCoordinatePolygon(_ coordinate: CLLocationCoordinate2D) -> Bool {
+        for polygon in userDrawablePolygons {
+            if GMSGeometryContainsLocation(coordinate, polygon.path!, true) {
+                return true
+            }
+        }
+        return false
     }
     
     // Events to track zoom level
@@ -263,7 +327,7 @@ extension ViewController: CLLocationManagerDelegate, GMSMapViewDelegate {
                 
                 let vc = storyboard?.instantiateViewController(withIdentifier: "DemoViewController") as! DemoViewController
                 vc.titleText = title
-                vc.me = Person(name: "Gaurav", age: 36, height: 5.8)
+                vc.marker = marker
                 
                 vc.modalPresentationStyle = .fullScreen
                 
@@ -276,22 +340,20 @@ extension ViewController: CLLocationManagerDelegate, GMSMapViewDelegate {
 
 // MARK - Add Custom Marker as well as add marker to the clusterManager
 extension ViewController {
-    func addMarker(at coordinate: CLLocationCoordinate2D) {
+    func addMarker(at coordinate: CLLocationCoordinate2D, person: Any = {}) {
         let pinImage = UIImage(named: "40") ?? UIImage()
-        
-        marker.position = coordinate
         
         geocoder.reverseGeocodeCoordinate(coordinate) { (response, error) in
             guard error == nil else { return }
             
             if let result = response?.firstResult() {
                 self.marker.title = result.lines?.first
-                self.markerWithImageAndText(image: pinImage, text: self.marker.title ?? "", position: coordinate, mapView: self.mapView)
+                self.markerWithImageAndText(image: pinImage, text: self.marker.title ?? "", person: person, position: coordinate, mapView: self.mapView)
             }
         }
     }
     
-    func markerWithImageAndText(image: UIImage, text: String, position: CLLocationCoordinate2D, mapView: GMSMapView) {
+    func markerWithImageAndText(image: UIImage, text: String, person: Any = {}, position: CLLocationCoordinate2D, mapView: GMSMapView) {
         let marker = GMSMarker(position: position)
         marker.title = text
         
@@ -333,9 +395,24 @@ extension ViewController {
         marker.iconView = customView
         
         marker.appearAnimation = .pop
-
+        marker.userData = person
+        
         clusterManager.add(marker)
         clusterManager.cluster()
+    }
+    
+    func addCustomTextToTheMarker(position: CLLocationCoordinate2D) {
+        let customView = UIView(frame: CGRect(x: 0, y: 0, width: 50, height: 50))
+        customView.backgroundColor = UIColor.red
+        customView.layer.cornerRadius = 25
+        
+        let coordinate = CLLocationCoordinate2D(latitude: position.latitude, longitude: position.longitude)
+
+        let position = mapView.projection.point(for: coordinate)
+
+        customView.center = position
+
+        mapView.addSubview(customView)
     }
 }
 
@@ -350,7 +427,7 @@ extension ViewController {
         let images = [image!, image!, image!]
         iconGenerator = GMUDefaultClusterIconGenerator(buckets: [5, 10, 20], backgroundImages: images)
         let renderer = GMUDefaultClusterRenderer(mapView: mapView!, clusterIconGenerator: iconGenerator)
-        // control clustering on specific zoom level
+        // creating cluster on specific zoom level
         renderer.maximumClusterZoom = 20
         let algorithm = GMUNonHierarchicalDistanceBasedAlgorithm()
         clusterManager = GMUClusterManager(map: mapView!, algorithm: algorithm, renderer: renderer)
@@ -383,19 +460,58 @@ extension ViewController {
             newpolygon.strokeWidth = 3
             newpolygon.strokeColor = UIColor(red: 20.0/255.0, green: 119.0/255.0, blue: 234.0/255.0, alpha: 0.75)
             newpolygon.fillColor = UIColor(red: 156.0/255.0, green: 202.0/255.0, blue: 254.0/255.0, alpha: 0.4)
+            newpolygon.userData = Person(name: "Hironmoy", age: 30, height: 5.7)
+            
             newpolygon.map = mapView
             userDrawablePolygons.append(newpolygon)
             
-            // Save the polygon coordinates
-            savePolygon(coordinates: drawableLoc)
+            // Center coordinate of the polygon
+            let centerCoordinate = calculateCenterCoordinateOfPolygon(newpolygon.path ?? GMSPath())
             
-            if drawableLoc.count > 2 {
+            if let person = userDrawablePolygons[0].userData as? Person {
+                addMarker(at: centerCoordinate, person: person)
+            }
+            
+            if drawCoordinates.count > 2 {
                 let coordinateBounds = GMSCoordinateBounds(path: newpolygon.path!)
-                
                 mapView.animate(with: .fit(coordinateBounds))
             }
         }
+        
+        isDrawing = false
+        buttonDraw.setImage(UIImage(systemName: "pencil.line"), for: .normal)
     }
+    
+    @objc func getPolygonToTheCenter() {        
+        let numberOfPolygons = userDrawablePolygons.count - 1
+        
+        if polygonCount > numberOfPolygons {
+            polygonCount = 0
+        }
+        
+        let coordinateBounds = GMSCoordinateBounds(path: userDrawablePolygons[polygonCount].path!)
+        
+        mapView.animate(with: .fit(coordinateBounds))
+        
+        polygonCount += 1
+    }
+    
+    // Getting the center of the polygon
+    func calculateCenterCoordinateOfPolygon(_ path: GMSPath) -> CLLocationCoordinate2D {
+            var latitudeSum: CLLocationDegrees = 0.0
+            var longitudeSum: CLLocationDegrees = 0.0
+
+            for i in 0..<path.count() {
+                let coordinate = path.coordinate(at: i)
+                latitudeSum += coordinate.latitude
+                longitudeSum += coordinate.longitude
+            }
+
+            let centerLatitude = latitudeSum / Double(path.count())
+            let centerLongitude = longitudeSum / Double(path.count())
+
+            return CLLocationCoordinate2D(latitude: centerLatitude, longitude: centerLongitude)
+        }
 }
 
 extension ViewController {
@@ -437,6 +553,7 @@ extension ViewController: NotifyTouchEvents {
     
     func touchEnded(touch: UITouch) {
         self.drawCoordinates.append(self.translateCoordinate(withTouch: touch))
+        saveSinglePolygon(coordinates: drawCoordinates)
         createPolygonFromTheDrawablePoints()
         getMarkerInsidePolygon()
     }
@@ -449,23 +566,36 @@ extension ViewController: NotifyTouchEvents {
 
 // Retrive polygon
 extension ViewController {
-    func savePolygon(coordinates: [CLLocationCoordinate2D]) {
-        // Array of dictionaries for saving
-        let polyCoordinates = coordinates.map { ["latitude": $0.latitude, "longitude": $0.longitude] }
-        
-        // Save the coordinates array to UserDefaults
-        UserDefaults.standard.set(polyCoordinates, forKey: "polygonCoordinates")
+    func savePolygons(polygons: [[[String: Double]]]) {
+        UserDefaults.standard.set(polygons, forKey: "savedPolygons")
     }
-    
-    func loadPolygon() {
-        // Retrieve coordinates from UserDefaults
-        if let savedCoordinates = UserDefaults.standard.array(forKey: "polygonCoordinates") as? [[String: Double]] {
-            drawCoordinates = savedCoordinates.map {
-                CLLocationCoordinate2D(latitude: $0["latitude"] ?? 0.0, longitude: $0["longitude"] ?? 0.0)
+
+    func loadPolygons() {
+        if let savedPolygons = UserDefaults.standard.array(forKey: "savedPolygons") as? [[[String: Double]]] {
+            for savedPolygon in savedPolygons {
+                var coordinates: [CLLocationCoordinate2D] = []
+                for coordDict in savedPolygon {
+                    guard let latitude = coordDict["latitude"], let longitude = coordDict["longitude"] else {
+                        continue
+                    }
+                    let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+                    coordinates.append(coordinate)
+                }
+                isDrawing = true
+                addPolyGonInMapView(drawableLoc: coordinates)
             }
-            
-            // Create a polygon from the saved coordinates
-            drawPolygon(drawCoordinates)
         }
+    }
+
+    func saveSinglePolygon(coordinates: [CLLocationCoordinate2D]) {
+        var savedPolygons: [[[String: Double]]] = []
+        let polyCoordinates = coordinates.map { ["latitude": $0.latitude, "longitude": $0.longitude] }
+        savedPolygons.append(polyCoordinates)
+        
+        if let existingPolygons = UserDefaults.standard.array(forKey: "savedPolygons") as? [[[String: Double]]] {
+            savedPolygons.append(contentsOf: existingPolygons)
+        }
+        
+        savePolygons(polygons: savedPolygons)
     }
 }
